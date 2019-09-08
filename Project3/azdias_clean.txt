@@ -1,0 +1,227 @@
+# Load in the general demographics data.
+azdias = pd.read_csv('Udacity_AZDIAS_Subset.csv',sep=';')
+
+# Load in the feature summary file.
+feat_info = pd.read_csv('AZDIAS_Feature_Summary.csv',sep=';')
+
+
+#converting character to string
+
+    # creating a new column and converting character to string
+    feat_info['m_or_u_list'] = feat_info['missing_or_unknown']
+
+    for i in  range(len(feat_info['m_or_u_list'])):
+        feat_info['m_or_u_list'][i] = feat_info['m_or_u_list'][i]\
+                                      .replace('XX', 'yy')
+        feat_info['m_or_u_list'][i] = feat_info['m_or_u_list'][i]\
+                                      .replace('X', ' "X" ')
+        feat_info['m_or_u_list'][i] = feat_info['m_or_u_list'][i]\
+                                      .replace('yy', ' "XX" ')
+
+    feat_info['m_or_u_list'] = feat_info['m_or_u_list'].map(ast.literal_eval)
+
+
+feat_info['missing_or_unknown'].replace({'[-1,X]': '[-1,"X"]',
+                                         '[-1,XX]': '[-1,"XX"]',
+                                          '[XX]': '["XX"]'}, inplace = True)
+
+
+enc = feat_info.set_index('attribute')['missing_or_unknown'].to_dict()
+print(enc)
+enc = {key: {i: np.nan for i in literal_eval(value)} for key, value in enc.items()}
+print(enc)
+for column,val in enc.items():
+    azdias[column].replace(val, inplace = True)
+
+azdias_nullcnt_col = pd.DataFrame(azdias.isnull().sum())
+azdias_nullcnt_col.columns =['num_of_nulls']	
+
+
+feat_info_joined = feat_info.set_index('attribute').join(azdias_nullcnt_col) # not sure
+
+outlier_col = azdias_nullcnt_col[azdias_nullcnt_col['num_of_nulls'] > 200000]
+	
+#outlier columns are ['AGER_TYP', 'GEBURTSJAHR', 'TITEL_KZ', 'ALTER_HH', 'KK_KUNDENTYP', 'KBA05_BAUMAX']
+
+
+outlier_columns = list(outlier_col.index)
+
+azdias.drop(outlier_columns, axis=1, inplace=True)
+azdias.shape
+
+
+def subset_on_rows(dataframe, quant):
+    '''
+    Splits dataframe into two subsets based on quantile of missing NaNs
+    
+    INPUT: dataframe, quantile of missing NaNs
+    OUTPUT: 2 dataframe - one with less than quantile NaNs and other with more than quantile NaNs
+    '''
+    
+    cut_off = dataframe.isnull().sum(axis=1).quantile([quant]).tolist()
+    
+    above_c_o = dataframe[dataframe.isnull().sum(axis=1) > cut_off].copy()
+    below_c_o = dataframe[dataframe.isnull().sum(axis=1) <= cut_off].copy()
+    
+    return above_c_o, below_c_o
+
+azdias_more_nans, azdias_few_nans = subset_on_rows(azdias, 0.75) 	
+
+categorical_names = []
+interval_names = []
+numeric_names = []
+mixed_names = []
+
+for i in range(feat_info.shape[0]):
+    if feat_info['type'][i] == 'numeric':
+        numeric_names.append(feat_info['attribute'][i])
+    if feat_info['type'][i] == 'interval':
+        interval_names.append(feat_info['attribute'][i])
+    if feat_info['type'][i] == 'mixed':
+        mixed_names.append(feat_info['attribute'][i])
+    if feat_info['type'][i] == 'categorical':
+        categorical_names.append(feat_info['attribute'][i])
+        
+print(f"Categorical type variables:\n{categorical_names}\n")
+print(f"Interval type variables:\n{interval_names}\n")
+print(f"Mixed type variables:\n{mixed_names}\n")
+print(f"Numeric type variables:\n{numeric_names}")
+
+-----------------------------------------------------------------------
+-----------------------------------------------------------------------
+binary_categories = []
+
+for i, j in enumerate(categorical_names):
+    
+    if azdias_few_nans.columns.isin([categorical_names[i]]).sum() > 0:
+        
+        if len(set(azdias_few_nans[categorical_names[i]].values)) == 2:
+            binary_categories.append(categorical_names[i])
+        else:
+            continue
+
+------------------------------------------------------------------------
+------------------------------------------------------------------------
+multi_lvl_categories = []
+
+for i,j in enumerate(categorical_names):
+    
+    if azdias_few_nans.columns.isin([categorical_names[i]]).sum() > 0:
+        
+        if len(set(azdias_few_nans[categorical_names[i]].values)) > 2:
+            multi_lvl_categories.append(categorical_names[i])
+        else:
+            continue
+
+multi_lvl_categories
+
+
+#['CJT_GESAMTTYP',
+# 'FINANZTYP',
+# 'GFK_URLAUBERTYP',
+# 'LP_FAMILIE_FEIN',
+# 'LP_FAMILIE_GROB',
+# 'LP_STATUS_FEIN',
+# 'LP_STATUS_GROB',
+#'NATIONALITAET_KZ',
+# 'SHOPPER_TYP',
+# 'ZABEOTYP',
+# 'GEBAEUDETYP',
+# 'CAMEO_DEUG_2015',
+# 'CAMEO_DEU_2015']
+
+
+--------------------------------------------------------------
+--------------------------------------------------------------
+
+azdias_few_nans['VERS_TYP'].replace([2.0, 1.0], [1, 0], inplace=True)
+azdias_few_nans['OST_WEST_KZ'].replace(['W', 'O'], [1, 0], inplace=True)
+azdias_few_nans['ANREDE_KZ'].replace([2, 1], [1, 0], inplace=True)
+
+azdias_few_nans = pd.get_dummies(azdias_few_nans, columns=multi_lvl_categories)
+
+mixed_features = feat_info[feat_info.type == 'mixed'].attribute
+
+p_j_dict_dec = {1: 1.0, 2: 1.0, 3: 2.0, 4: 2.0, 5: 3.0,\
+                6: 3.0, 7: 3.0, 8: 4.0, 9: 4.0, 10: 5.0,\
+                11: 5.0, 12: 5.0, 13: 5.0, 14: 6.0, 15: 6.0}
+
+azdias_few_nans["P_J_Decade"] = azdias_few_nans["PRAEGENDE_JUGENDJAHRE"]
+azdias_few_nans["P_J_Decade"] = azdias_few_nans["P_J_Decade"].map(p_j_dict_dec)
+
+p_j_dict_move = {1: 1.0, 2: 0.0, 3: 1.0, 4: 0.0, 5: 1.0, 6: 0.0,\
+                 7: 0.0, 8: 1.0, 9: 0.0, 10: 1.0, 11: 0.0, 12: 1.0,\
+                 13: 0.0, 14: 1.0, 15: 0.0}
+
+azdias_few_nans["P_J_Movement"] = azdias_few_nans["PRAEGENDE_JUGENDJAHRE"]
+azdias_few_nans["P_J_Movement"] = azdias_few_nans["P_J_Movement"].map(p_j_dict_move)
+
+azdias_few_nans.drop(["PRAEGENDE_JUGENDJAHRE"], axis=1, inplace=True) 
+azdias_few_nans.shape
+
+# Creating ordinal wealth variable
+c_i_15_dict_wealth = {'11': 1.0, '12': 1.0, '13': 1.0, '14': 1.0, '15': 1.0,\
+                      '21': 2.0, '22': 2.0, '23': 2.0, '24': 2.0, '25': 2.0,\
+                      '31': 3.0, '32': 3.0, '33': 3.0, '34': 3.0, '35': 3.0,\
+                      '41': 4.0, '42': 4.0, '43': 4.0, '44': 4.0, '45': 4.0,\
+                      '51': 5.0, '52': 5.0, '53': 5.0, '54': 5.0, '55': 1.0}
+
+azdias_few_nans["C_I_15_Wealth"] = azdias_few_nans["CAMEO_INTL_2015"]
+azdias_few_nans["C_I_15_Wealth"] = azdias_few_nans["C_I_15_Wealth"]\
+                                        .map(c_i_15_dict_wealth)
+
+# Creating life stage variable
+
+c_i_15_dict_ls = {'11': 1.0, '12': 2.0, '13': 3.0, '14': 4.0, '15': 5.0,\
+                  '21': 1.0, '22': 2.0, '23': 3.0, '24': 4.0, '25': 5.0,\
+                  '31': 1.0, '32': 2.0, '33': 3.0, '34': 4.0, '35': 5.0,\
+                  '41': 1.0, '42': 2.0, '43': 3.0, '44': 4.0, '45': 5.0,\
+                  '51': 1.0, '52': 2.0, '53': 3.0, '54': 4.0, '55': 5.0}
+
+azdias_few_nans["C_I_15_LS"] = azdias_few_nans["CAMEO_INTL_2015"]
+azdias_few_nans["C_I_15_LS"] = azdias_few_nans["C_I_15_LS"].map(c_i_15_dict_ls)
+
+azdias_few_nans.drop(["CAMEO_INTL_2015"], axis=1, inplace=True) 
+azdias_few_nans.shape
+
+# Creating ordinal variable for neighborhood values
+wohnlage_nbh_dict = {1: 1.0, 2: 2.0, 3: 3.0, 4: 4.0,\
+                     5: 5.0, 6: 6.0, 7: np.nan, 8: np.nan}
+
+azdias_few_nans["WOHNLAGE_NBH"] = azdias_few_nans["WOHNLAGE"]
+azdias_few_nans["WOHNLAGE_NBH"] = azdias_few_nans["WOHNLAGE_NBH"]\
+                                       .map(wohnlage_nbh_dict)
+
+azdias_few_nans.drop(["WOHNLAGE"], axis=1, inplace=True) 
+
+azdias_few_nans.shape
+
+# Engineering two new variables for the variable PLZ8_BAUMAX
+
+# Ordinal variable for no. of homes
+
+plz8_baumax_homes_dict = {1: 1.0, 2: 2.0, 3: 3.0, 4: 4.0}
+
+azdias_few_nans["PLZ8_BAUMAX_HOMES"] = azdias_few_nans["PLZ8_BAUMAX"]
+azdias_few_nans["PLZ8_BAUMAX_HOMES"] = azdias_few_nans["PLZ8_BAUMAX_HOMES"]\
+                                            .map(plz8_baumax_homes_dict)
+
+# Binary categorical variable for business buildings
+plz8_baumax_business_dict = {1: 0, 2: 0, 3: 0, 4: 0, 5: 1}
+
+azdias_few_nans["PLZ8_BAUMAX_BUSINESS"] = azdias_few_nans["PLZ8_BAUMAX"]
+azdias_few_nans["PLZ8_BAUMAX_BUSINESS"] = azdias_few_nans["PLZ8_BAUMAX_BUSINESS"]\
+                                               .map(plz8_baumax_business_dict)
+    
+#dropping non encoded var
+azdias_few_nans.drop(["LP_LEBENSPHASE_FEIN"], axis=1, inplace=True) 
+azdias_few_nans.shape
+
+azdias_few_nans.drop(["LP_LEBENSPHASE_GROB"], axis=1, inplace=True) 
+azdias_few_nans.shape
+
+(684502, 195)
+    
+# Dropping original variable
+azdias_few_nans.drop(["PLZ8_BAUMAX"], axis=1, inplace=True) 
+azdias_few_nans.shape
